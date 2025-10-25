@@ -67,13 +67,10 @@
   </div>
 
 <script>
-/* ============================
-   STATE & HELPERS
-   ============================ */
-const PATTERNS = 'ABCDEFGHIJKLMNOPQRST'.split(''); // A..T
+const PATTERNS = 'ABCDEFGHIJKLMNOPQRST'.split('');
 let activePattern = null;
 
-// build pattern buttons
+// === Build pattern buttons ===
 const patternRow = document.getElementById('patternRow');
 PATTERNS.forEach(p => {
   const btn = document.createElement('button');
@@ -98,331 +95,215 @@ function selectPattern(p) {
 function cleanInput(raw) {
   return raw.split(/[^0-9]+/).map(x => x.trim()).filter(x => /^\d{4}$/.test(x));
 }
-function valid3DigitStr(s) {
-  return /^\d{3}$/.test(s);
+function last3Of4(s4) { return s4.slice(-3); }
+function valid3DigitStr(s) { return /^\d{3}$/.test(s); }
+
+// === FILTER RULES ===
+function isTriple(num3) {
+  return num3[0] === num3[1] && num3[1] === num3[2];
 }
-function last3Of4(s4) {
-  return s4.slice(-3);
+function hasForbiddenDouble(num3, lastHist3) {
+  // if lastHist3 has 2 consecutive same digits, forbid same pattern position
+  if (lastHist3[0] === lastHist3[1] && num3[0] === num3[1]) return true;
+  if (lastHist3[1] === lastHist3[2] && num3[1] === num3[2]) return true;
+  return false;
+}
+function forbiddenPositionsFromLast2(histArr) {
+  const forb = {0:null,1:null,2:null};
+  if (histArr.length < 2) return forb;
+  const last2 = histArr.slice(-2).map(x => last3Of4(x));
+  for (let pos=0; pos<3; pos++) {
+    const a = last2[0][pos], b = last2[1][pos];
+    if (a === b) forb[pos] = a;
+  }
+  return forb;
+}
+function forbiddenLast30(histArr) {
+  return histArr.slice(-30).map(x => last3Of4(x));
 }
 
-/* ============================
-   CORE: generatePredictions3D(numbers, pola)
-   - returns up to 100 unique 3-digit strings ('000'..'999')
-   - uses diverse formulas per pola (A-T) based on 4 digits
-   - ensures no item equals last3 of last history
-   - if less than 100 unique produced, adds deterministic offsets to fill to 100
-   ============================ */
+// === CORE: generatePredictions3D ===
 function generatePredictions3D(numbers, pola) {
   if (!PATTERNS.includes(pola)) return [];
   const results = [];
   const seen = new Set();
-  // get last3 of last history to avoid equal
   const lastHist = numbers.length ? last3Of4(numbers[numbers.length - 1]) : null;
+  const forbLast30 = forbiddenLast30(numbers);
+  const forbPos = forbiddenPositionsFromLast2(numbers);
 
-  // helper to push candidate safely
   const pushCandidate = (num) => {
-    // normalize to 0..999
     let n = ((num % 1000) + 1000) % 1000;
     const s = String(n).padStart(3, '0');
     if (!valid3DigitStr(s)) return;
-    if (lastHist && s === lastHist) return;
-    if (!seen.has(s)) {
-      seen.add(s);
-      results.push(s);
+    if (isTriple(s)) return;
+    if (lastHist && hasForbiddenDouble(s, lastHist)) return;
+    if (forbLast30.includes(s)) return;
+    // check forbidden positions from last 2
+    for (let i=0;i<3;i++) {
+      if (forbPos[i] !== null && s[i] === forbPos[i]) return;
     }
+    if (!seen.has(s)) { seen.add(s); results.push(s); }
   };
 
-  // iterate through history and generate candidates
+  // === pattern formulae ===
   for (let raw of numbers) {
-    // raw is 4-digit string
     const d = raw.split('').map(x => parseInt(x, 10));
     let d1=d[0], d2=d[1], d3=d[2], d4=d[3];
-
     switch(pola) {
-      case 'A':
-        // combine (d1+d2+d3) as hundreds,take d4 as units chunk -> build many variants
-        pushCandidate((d1 + d2 + d3)*10 + d4);
-        pushCandidate((d1*100 + d2*10 + d3) % 1000);
-        break;
-      case 'B':
-        pushCandidate(((d2 + d3 + d4) * Math.max(1,d1)) % 1000);
-        pushCandidate((d2*100 + d3*10 + d4) % 1000);
-        break;
-      case 'C':
-        pushCandidate((Math.abs(d1 - d4) * 100 + (d2 + d3) % 100));
-        pushCandidate(((d1 + d4)*10 + (Math.abs(d2 - d3))) % 1000);
-        break;
-      case 'D':
-        // rotation: d3 d4 d1
-        pushCandidate(d3*100 + d4*10 + d1);
-        pushCandidate((d4*100 + d1*10 + d2) % 1000);
-        break;
-      case 'E':
-        pushCandidate((d1*d3 + d2) % 1000);
-        pushCandidate((d2*d4 + d1) % 1000);
-        break;
-      case 'F':
-        pushCandidate((d4 * d2) % 1000);
-        pushCandidate((d4*100 + d2*10 + ((d1+d3)%10)) % 1000);
-        break;
-      case 'G':
-        pushCandidate(((d1 + d4) * Math.max(1, (d2 - d3))) % 1000);
-        pushCandidate(((d1 + d4) * Math.abs(d2 - d3)) % 1000);
-        break;
-      case 'H':
-        pushCandidate(Math.floor((d1 + d2 + d3 + d4)/4) * 11 % 1000);
-        pushCandidate(Math.floor((d1 + d2 + d3 + d4)/4) * 7 % 1000);
-        break;
-      case 'I':
-        pushCandidate((d1 * d2 * d3 * (d4 || 1)) % 1000);
-        pushCandidate(((d1+1) * (d2+1) * (d3+1) * (d4+1)) % 1000);
-        break;
-      case 'J':
-        pushCandidate(((d1 + d3)*(d1 + d3) + (d2 + d4)) % 1000);
-        pushCandidate(((d2 + d4)*(d2 + d4) + (d1 + d3)) % 1000);
-        break;
-      case 'K':
-        pushCandidate(((d2*d2 + d3*d3) ) % 1000);
-        pushCandidate(((d2*10 + d3*3) ) % 1000);
-        break;
-      case 'L':
-        // mirror: d4 d3 d2
-        pushCandidate(d4*100 + d3*10 + d2);
-        pushCandidate(d3*100 + d2*10 + d1);
-        break;
-      case 'M':
-        pushCandidate((d1 + d2 + d3 + d4) % 1000);
-        pushCandidate(((d1*3 + d2*2 + d3*1 + d4*4)) % 1000);
-        break;
-      case 'N':
-        pushCandidate((d1*d2 + d3*d4) % 1000);
-        pushCandidate(((d1 + d2) * (d3 + d4)) % 1000);
-        break;
-      case 'O':
-        pushCandidate(( (d1 + d3) - (d2 + d4) + 1000) % 1000);
-        pushCandidate((Math.abs(d1 - d3)*100 + Math.abs(d2 - d4)) % 1000);
-        break;
-      case 'P':
-        pushCandidate((Math.abs(d1-d2) * 10 + Math.abs(d3-d4)) % 1000);
-        pushCandidate((Math.abs(d1-d2)*100 + Math.abs(d3-d4)) % 1000);
-        break;
-      case 'Q':
-        pushCandidate((d1*3 + d2*7 + d3*9 + d4*5) % 1000);
-        pushCandidate((d1*11 + d2*13 + d3*17 + d4*19) % 1000);
-        break;
-      case 'R':
-        pushCandidate(((d1 + d4)*(d1 + d4)) % 1000);
-        pushCandidate(((d1 + d4)*123) % 1000);
-        break;
-      case 'S':
-        pushCandidate((d1*d1 + d2*d3 + d4) % 1000);
-        pushCandidate((d1*d2 + d3*d3 + d4) % 1000);
-        break;
-      case 'T':
-        pushCandidate(((d1 + d2 + d3 + d4)*(d1 + d2 + d3 + d4)) % 1000);
-        pushCandidate(((d1 + d2 + d3 + d4)*37) % 1000);
-        break;
+      case 'A': pushCandidate((d1+d2+d3)*10+d4); pushCandidate((d1*100+d2*10+d3)%1000); break;
+      case 'B': pushCandidate(((d2+d3+d4)*Math.max(1,d1))%1000); pushCandidate((d2*100+d3*10+d4)%1000); break;
+      case 'C': pushCandidate((Math.abs(d1-d4)*100+(d2+d3)%100)); pushCandidate(((d1+d4)*10+Math.abs(d2-d3))%1000); break;
+      case 'D': pushCandidate(d3*100+d4*10+d1); pushCandidate((d4*100+d1*10+d2)%1000); break;
+      case 'E': pushCandidate((d1*d3+d2)%1000); pushCandidate((d2*d4+d1)%1000); break;
+      case 'F': pushCandidate((d4*d2)%1000); pushCandidate((d4*100+d2*10+((d1+d3)%10))%1000); break;
+      case 'G': pushCandidate(((d1+d4)*Math.max(1,(d2-d3)))%1000); pushCandidate(((d1+d4)*Math.abs(d2-d3))%1000); break;
+      case 'H': pushCandidate(Math.floor((d1+d2+d3+d4)/4)*11%1000); pushCandidate(Math.floor((d1+d2+d3+d4)/4)*7%1000); break;
+      case 'I': pushCandidate((d1*d2*d3*(d4||1))%1000); pushCandidate(((d1+1)*(d2+1)*(d3+1)*(d4+1))%1000); break;
+      case 'J': pushCandidate(((d1+d3)*(d1+d3)+(d2+d4))%1000); pushCandidate(((d2+d4)*(d2+d4)+(d1+d3))%1000); break;
+      case 'K': pushCandidate(((d2*d2+d3*d3))%1000); pushCandidate(((d2*10+d3*3))%1000); break;
+      case 'L': pushCandidate(d4*100+d3*10+d2); pushCandidate(d3*100+d2*10+d1); break;
+      case 'M': pushCandidate((d1+d2+d3+d4)%1000); pushCandidate(((d1*3+d2*2+d3*1+d4*4))%1000); break;
+      case 'N': pushCandidate((d1*d2+d3*d4)%1000); pushCandidate(((d1+d2)*(d3+d4))%1000); break;
+      case 'O': pushCandidate(((d1+d3)-(d2+d4)+1000)%1000); pushCandidate((Math.abs(d1-d3)*100+Math.abs(d2-d4))%1000); break;
+      case 'P': pushCandidate((Math.abs(d1-d2)*10+Math.abs(d3-d4))%1000); pushCandidate((Math.abs(d1-d2)*100+Math.abs(d3-d4))%1000); break;
+      case 'Q': pushCandidate((d1*3+d2*7+d3*9+d4*5)%1000); pushCandidate((d1*11+d2*13+d3*17+d4*19)%1000); break;
+      case 'R': pushCandidate(((d1+d4)*(d1+d4))%1000); pushCandidate(((d1+d4)*123)%1000); break;
+      case 'S': pushCandidate((d1*d1+d2*d3+d4)%1000); pushCandidate((d1*d2+d3*d3+d4)%1000); break;
+      case 'T': pushCandidate(((d1+d2+d3+d4)*(d1+d2+d3+d4))%1000); pushCandidate(((d1+d2+d3+d4)*37)%1000); break;
     }
     if (seen.size >= 100) break;
-  } // end for history
+  }
 
-  // If not enough candidates, add deterministic offsets based on pola name to fill to 100
-  let offsetBase = pola.charCodeAt(0) - 65 + 1; // 1..20
+  // filler
+  let offsetBase = pola.charCodeAt(0) - 65 + 1;
   let i = 0;
   const existing = Array.from(seen);
-  // Use existing candidates as seeds; if none, use sequence 0..999 with offset
   while (seen.size < 100) {
-    if (results.length === 0) {
-      // no seed: generate offset sequence
-      pushCandidate(offsetBase * i + (offsetBase + i));
-    } else {
-      // perturb existing seeds in round-robin
-      const seed = existing[i % existing.length] || '000';
-      const seedNum = parseInt(seed, 10);
-      pushCandidate(seedNum + offsetBase * (i+1));
-    }
-    i++;
-    if (i > 5000) break; // safety
+    const seed = existing.length ? parseInt(existing[i % existing.length],10) : 0;
+    pushCandidate(seed + offsetBase * (i+1));
+    i++; if (i>5000) break;
   }
 
   return results.slice(0, 100);
 }
 
-/* ============================
-   PREDICT GLOBAL
-   ============================ */
+// === Predict Global ===
 function predictGlobal() {
   const raw = document.getElementById('historyBox').value.trim();
   if (!raw) return alert('Masukkan histori terlebih dahulu.');
   const numbers = cleanInput(raw);
   if (!numbers.length) return alert('Tidak ditemukan histori 4-digit valid.');
-  if (!activePattern) return alert('Pilih pola (A–T) terlebih dahulu dengan klik salah satu tombol pola.');
+  if (!activePattern) return alert('Pilih pola (A–T) terlebih dahulu.');
 
   const preds = generatePredictions3D(numbers, activePattern);
-  if (!preds.length) {
-    document.getElementById('resultGlobal').textContent = '(Tidak ada kandidat valid untuk pola ' + activePattern + ')';
-    document.getElementById('globalMeta').textContent = 'Jumlah kandidat: 0';
-  } else {
-    document.getElementById('resultGlobal').textContent = preds.join('*');
-    document.getElementById('globalMeta').textContent = 'Jumlah kandidat: ' + preds.length + ' (Pola ' + activePattern + ')';
-  }
+  document.getElementById('resultGlobal').textContent = preds.join('*');
+  document.getElementById('globalMeta').textContent = 'Jumlah kandidat: ' + preds.length + ' (Pola ' + activePattern + ')';
 
   const accText = calculateAccuracyGlobal(numbers, activePattern);
   document.getElementById('accuracyBox').textContent = accText.summary;
   document.getElementById('testTableBox').innerHTML = accText.tableHtml;
 }
 
-/* ============================
-   ACCURACY EVALUATION (global)
-   - uses last 100 historis
-   - compares predicted 3-digit set with next's last3
-   ============================ */
+// === Akurasi ===
 function calculateAccuracyGlobal(numbers, pola) {
-  if (numbers.length < 101) {
-    return { summary: "Histori terlalu sedikit untuk evaluasi (butuh >=101).", tableHtml: "" };
+  if (numbers.length < 101) return { summary:"Histori terlalu sedikit (butuh >=101).", tableHtml:"" };
+  let hits=0, misses=0;
+  const rows=[];
+  const testRange=numbers.slice(-100);
+  for(let i=0;i<testRange.length-1;i++){
+    const posFromEnd=testRange.length-1-i;
+    const subset=numbers.slice(0,numbers.length-posFromEnd);
+    const next=testRange[i+1], next3=last3Of4(next);
+    const preds=generatePredictions3D(subset,pola);
+    const hit=preds.includes(next3);
+    if(hit) hits++; else misses++;
+    rows.push(`<tr><td>${next3}</td><td class="${hit?'hit':'miss'}">${hit?'Hit':'Miss'}</td></tr>`);
   }
-  let hits = 0, misses = 0;
-  const rows = [];
-  const testRange = numbers.slice(-100);
-  for (let i = 0; i < testRange.length - 1; i++) {
-    const posFromEnd = testRange.length - 1 - i;
-    const subsetGlobalEnd = numbers.length - posFromEnd;
-    const subsetGlobal = numbers.slice(0, subsetGlobalEnd);
-    const next = testRange[i + 1];
-    const nextLast3 = last3Of4(next);
-    const predGlobal = generatePredictions3D(subsetGlobal, pola);
-    const hit = predGlobal.includes(nextLast3);
-    if (hit) hits++; else misses++;
-    rows.push(`<tr><td>${nextLast3}</td><td class="${hit ? 'hit' : 'miss'}">${hit ? 'Hit' : 'Miss'}</td></tr>`);
-  }
-  const acc = ((hits / (hits + misses)) * 100).toFixed(2);
-  const summary = `Global: Hit ${hits}, Miss ${misses}, Akurasi ${acc}% (pola ${pola})`;
-  const tableHtml = `<table><tr><th>Next (last3)</th><th>Global (${pola})</th></tr>${rows.join('')}</table>`;
-  return { summary, tableHtml };
+  const acc=((hits/(hits+misses))*100).toFixed(2);
+  const summary=`Global: Hit ${hits}, Miss ${misses}, Akurasi ${acc}% (pola ${pola})`;
+  return { summary, tableHtml:`<table><tr><th>Next (last3)</th><th>Global (${pola})</th></tr>${rows.join('')}</table>` };
 }
 
-/* ============================
-   EVALUATE ALL PATTERNS (pick top2)
-   - compute acc and longest miss streak for each pola
-   - sort: acc desc, missStreak desc, pola asc
-   ============================ */
-function evaluateAllPatterns(numbers) {
-  const patterns = PATTERNS.slice();
-  const results = [];
-  const testRange = numbers.slice(-100);
-  for (let pola of patterns) {
-    let hits = 0, misses = 0;
-    const history = [];
-    for (let i = 0; i < testRange.length - 1; i++) {
-      const posFromEnd = testRange.length - 1 - i;
-      const subsetGlobalEnd = numbers.length - posFromEnd;
-      const subsetGlobal = numbers.slice(0, subsetGlobalEnd);
-      const next = testRange[i + 1];
-      const nextLast3 = last3Of4(next);
-      const predGlobal = generatePredictions3D(subsetGlobal, pola);
-      const globalHit = predGlobal.includes(nextLast3);
-      history.push(globalHit ? 'H' : 'M');
-      if (globalHit) hits++; else misses++;
+// === Kombinasi Pola Terbaik ===
+function evaluateAllPatterns(numbers){
+  const res=[];
+  const testRange=numbers.slice(-100);
+  for(let pola of PATTERNS){
+    const history=[];
+    let hits=0,miss=0;
+    for(let i=0;i<testRange.length-1;i++){
+      const posFromEnd=testRange.length-1-i;
+      const subset=numbers.slice(0,numbers.length-posFromEnd);
+      const next=testRange[i+1];
+      const next3=last3Of4(next);
+      const preds=generatePredictions3D(subset,pola);
+      const hit=preds.includes(next3);
+      history.push(hit?'H':'M');
+      if(hit) hits++; else miss++;
     }
-    const total = hits + misses;
-    const acc = total > 0 ? (hits / total) * 100 : 0;
-    // compute longest consecutive misses
-    let longestMiss = 0, cur = 0;
-    for (let s of history) {
-      if (s === 'M') { cur++; if (cur > longestMiss) longestMiss = cur; }
-      else { cur = 0; }
+    const acc=(hits+miss)>0?(hits/(hits+miss))*100:0;
+    // new miss streak rule: count last consecutive M until hit
+    let streak=0;
+    for(let j=history.length-1;j>=0;j--){
+      if(history[j]==='M') streak++;
+      else break;
     }
-    results.push({ pola, acc: parseFloat(acc.toFixed(4)), longestMiss });
+    res.push({pola, acc:parseFloat(acc.toFixed(4)), longestMiss:streak});
   }
+  res.sort((a,b)=> b.acc!==a.acc ? b.acc-a.acc : b.longestMiss!==a.longestMiss ? b.longestMiss-a.longestMiss : a.pola.localeCompare(b.pola));
+  return res;
+}
 
-  results.sort((a,b) => {
-    if (b.acc !== a.acc) return b.acc - a.acc;
-    if (b.longestMiss !== a.longestMiss) return b.longestMiss - a.longestMiss;
-    return a.pola.localeCompare(b.pola);
+function computeCombination(){
+  const raw=document.getElementById('historyBox').value.trim();
+  if(!raw) return alert('Masukkan histori terlebih dahulu.');
+  const numbers=cleanInput(raw);
+  if(!numbers.length) return alert('Tidak ditemukan histori 4-digit valid.');
+  const evals=evaluateAllPatterns(numbers);
+  if(evals.length<2) return alert('Gagal mengevaluasi pola.');
+  const top1=evals[0], top2=evals[1];
+  const preds1=generatePredictions3D(numbers,top1.pola);
+  const preds2=generatePredictions3D(numbers,top2.pola);
+  const seen=new Set(), combined=[];
+  for(let x of preds1){ if(!seen.has(x)){combined.push(x);seen.add(x);} }
+  for(let x of preds2){ if(!seen.has(x)){combined.push(x);seen.add(x);} }
+  const html=`
+    <b>Pola Terbaik:</b><br>
+    1️⃣ ${top1.pola} — Akurasi ${top1.acc.toFixed(2)}%, Miss streak ${top1.longestMiss}<br>
+    2️⃣ ${top2.pola} — Akurasi ${top2.acc.toFixed(2)}%, Miss streak ${top2.longestMiss}<br><br>
+    <b>Gabungan Prediksi (${combined.length} angka):</b><br>
+    <div class='result-box'>${combined.join('*')}</div>
+    <button class='btn copyBtn' onclick='copyCombo()'>Salin Gabungan</button>`;
+  document.getElementById('comboResults').innerHTML=html;
+  document.getElementById('comboInfo').textContent='2 Pola terbaik terpilih berdasarkan akurasi & miss streak.';
+}
+
+function resetAll(){
+  document.getElementById('historyBox').value='';
+  document.getElementById('resultGlobal').textContent='(Belum ada prediksi)';
+  document.getElementById('globalMeta').textContent='Jumlah kandidat: -';
+  document.getElementById('accuracyBox').textContent='(Akurasi belum dihitung)';
+  document.getElementById('testTableBox').innerHTML='';
+  document.getElementById('comboResults').innerHTML='';
+  document.getElementById('comboInfo').textContent='Tekan tombol Kombinasi untuk menghitung 2 pola terbaik.';
+  PATTERNS.forEach(q=>{
+    const el=document.getElementById('pat_'+q);
+    if(el) el.classList.remove('btn-active');
   });
-  return results;
+  activePattern=null;
 }
 
-/* ============================
-   COMPUTE COMBINATION (top2)
-   - generate 100 preds per top pola
-   - combine preserving order: preds1 then preds2 items not seen before
-   - display count and joined '*' list (no spaces)
-   ============================ */
-function computeCombination() {
-  const raw = document.getElementById('historyBox').value.trim();
-  if (!raw) return alert('Masukkan histori terlebih dahulu.');
-  const numbers = cleanInput(raw);
-  if (!numbers.length) return alert('Tidak ditemukan histori 4-digit valid.');
-
-  const evals = evaluateAllPatterns(numbers);
-  if (!evals || evals.length < 2) return alert('Gagal mengevaluasi pola.');
-
-  const top1 = evals[0], top2 = evals[1];
-  const preds1 = generatePredictions3D(numbers, top1.pola);
-  const preds2 = generatePredictions3D(numbers, top2.pola);
-
-  const combined = [];
-  const seen = new Set();
-  for (let x of preds1) { if (!seen.has(x)) { combined.push(x); seen.add(x); } }
-  for (let x of preds2) { if (!seen.has(x)) { combined.push(x); seen.add(x); } }
-
-  const html = `
-    <div>
-      <div><b>Pola Terbaik 1:</b> ${top1.pola} — Akurasi ${(top1.acc).toFixed(2)}% — MissStreak ${top1.longestMiss}</div>
-      <div><b>Pola Terbaik 2:</b> ${top2.pola} — Akurasi ${(top2.acc).toFixed(2)}% — MissStreak ${top2.longestMiss}</div>
-      <div class="meta" style="margin-top:8px;"><b>Total angka gabungan (unik):</b> ${combined.length}</div>
-      <div id="comboList" class="result-box" style="margin-top:8px; white-space:nowrap;">${combined.length ? combined.join('*') : '(Kosong)'}</div>
-      <div style="margin-top:8px;"><button class="btn" onclick="copyCombo()">Salin Hasil Kombinasi</button></div>
-    </div>
-  `;
-  document.getElementById('comboInfo').textContent = '';
-  document.getElementById('comboResults').innerHTML = html;
+function copyGlobal(){
+  const txt=document.getElementById('resultGlobal').textContent;
+  navigator.clipboard.writeText(txt);
+  alert('Hasil Global disalin.');
 }
-
-/* ============================
-   COPY FUNCTIONS
-   ============================ */
-function copyGlobal() {
-  const el = document.getElementById('resultGlobal');
-  const text = el.innerText || el.textContent || '';
-  if (!text.trim()) return alert('Tidak ada hasil untuk disalin.');
-  navigator.clipboard.writeText(text).then(() => {
-    alert('Hasil prediksi global disalin ke clipboard.');
-  }).catch(err => {
-    alert('Gagal menyalin: ' + err);
-  });
+function copyCombo(){
+  const el=document.querySelector('#comboResults .result-box');
+  if(!el) return;
+  navigator.clipboard.writeText(el.textContent);
+  alert('Gabungan disalin.');
 }
-function copyCombo() {
-  const listDiv = document.getElementById('comboList');
-  if (!listDiv) return alert('Tidak ada hasil kombinasi untuk disalin.');
-  const text = listDiv.innerText || listDiv.textContent || '';
-  if (!text.trim()) return alert('Tidak ada hasil kombinasi untuk disalin.');
-  navigator.clipboard.writeText(text).then(() => {
-    alert('Hasil kombinasi disalin ke clipboard.');
-  }).catch(err => {
-    alert('Gagal menyalin: ' + err);
-  });
-}
-
-/* ============================
-   RESET
-   ============================ */
-function resetAll() {
-  document.getElementById('historyBox').value = '';
-  document.getElementById('resultGlobal').textContent = '(Belum ada prediksi)';
-  document.getElementById('globalMeta').textContent = 'Jumlah kandidat: -';
-  document.getElementById('accuracyBox').textContent = '(Akurasi belum dihitung)';
-  document.getElementById('testTableBox').textContent = '';
-  document.getElementById('comboInfo').textContent = 'Tekan tombol Kombinasi untuk menghitung 2 pola terbaik dari A–T (berdasarkan akurasi 100 histori terakhir).';
-  document.getElementById('comboResults').innerHTML = '';
-  PATTERNS.forEach(q => {
-    const el = document.getElementById('pat_' + q);
-    if (el) el.classList.remove('btn-active');
-  });
-  activePattern = null;
-}
-resetAll();
 </script>
 </body>
 </html>
